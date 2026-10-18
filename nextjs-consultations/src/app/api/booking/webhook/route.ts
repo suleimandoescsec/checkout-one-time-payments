@@ -8,6 +8,7 @@ export async function POST(request: Request) {
   let event: Stripe.Event;
   try { event = stripeClient().webhooks.constructEvent(await request.text(), signature, secret); }
   catch { return new NextResponse("Invalid signature", { status: 400 }); }
+  if (process.env.NODE_ENV === "production" && !event.livemode) return new NextResponse("Live events required", { status: 400 });
   if (!["checkout.session.completed","checkout.session.async_payment_succeeded","checkout.session.async_payment_failed","checkout.session.expired"].includes(event.type)) return NextResponse.json({ received: true });
   try { await processSession(event.data.object as Stripe.Checkout.Session, event.type); return NextResponse.json({ received: true }); }
   catch (error) { console.error("Booking webhook failed", error instanceof Error ? error.name : "Unknown error"); return new NextResponse("Please retry", { status: 500 }); }

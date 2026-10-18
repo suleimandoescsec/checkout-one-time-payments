@@ -10,10 +10,23 @@ export function stripeClient() {
   if (!key) throw new Error("Booking payments are not configured");
   return new Stripe(key, { apiVersion: "2026-08-26.dahlia", maxNetworkRetries: 2, appInfo: { name: "Personal Consultations", version: "1.0.0", url: "https://github.com/suleimandoescsec/checkout-one-time-payments" } });
 }
-export function ready() { return !!(process.env.BOOKING_STRIPE_KEY && process.env.BOOKING_STRIPE_WEBHOOK_SECRET && process.env.BOOKING_RESEND_KEY && process.env.BOOKING_DATABASE_URL && process.env.BOOKING_SIGNING_SECRET); }
+export function ready() {
+  const key=process.env.BOOKING_STRIPE_KEY || "";
+  const validMode=process.env.NODE_ENV !== "production" || /^(sk|rk)_live_/.test(key);
+  return !!(key && validMode && process.env.BOOKING_STRIPE_ACCOUNT_ID && process.env.BOOKING_STRIPE_WEBHOOK_SECRET && process.env.BOOKING_RESEND_KEY && process.env.BOOKING_DATABASE_URL && process.env.BOOKING_SIGNING_SECRET);
+}
+
+let verifiedUntil=0;
+export async function assertMerchant() {
+  if(Date.now()<verifiedUntil)return;
+  const account=await stripeClient().accounts.retrieveCurrent();
+  if(account.id!==process.env.BOOKING_STRIPE_ACCOUNT_ID || !account.charges_enabled)throw new Error("The booking Stripe account is not ready");
+  verifiedUntil=Date.now()+300000;
+}
 
 // Adapted from stripe-samples/checkout-one-time-payments (MIT); see THIRD_PARTY_NOTICES.md.
 export async function checkout(row: Reservation) {
+  await assertMerchant();
   const token = bookingToken(row.id);
   const session = await stripeClient().checkout.sessions.create({
     mode: "payment",
