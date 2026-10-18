@@ -1,5 +1,12 @@
 # Accept payments with Stripe Checkout
 
+## Added: self-hosted paid consultations
+
+See [nextjs-consultations](./nextjs-consultations) for the native booking calendar,
+host dashboard, PostgreSQL reservations and webhook-confirmed paid consultations.
+It supports English/Arabic, automatic visitor time zones and two hosts without a
+Calendly subscription. The original Stripe samples are preserved below.
+
 This sample shows you how to integrate with Stripe [Checkout](https://docs.stripe.com/checkout).
 
 Building a payment form UI from scratch is difficult -- input field validation, error message handing, and localization are just a few things to think about when designing a simple checkout flow.
