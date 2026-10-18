@@ -10,7 +10,7 @@ export type BookingSettings = {
 };
 
 export const bookingHosts = {
-  suleiman: { name: "Suleiman Alnsour", firstName: "Suleiman", email: "suleiman@instantreply.co", back: "/links/en", adminKeyEnv: "BOOKING_ADMIN_KEY", topics: ["Building with AI", "Business", "Marketing"] },
+  suleiman: { name: "Suleiman Alnsour", firstName: "Suleiman", email: "suleiman@instantreply.co", back: "/links/en", adminKeyEnv: "BOOKING_ADMIN_KEY", topics: ["Not sure yet", "AI & automation", "Websites & online stores", "SEO & AI visibility", "Leads, content & marketing"] },
   saif: { name: "Saif Jamal", firstName: "Saif", email: "saiffarroukh@gmail.com", back: "https://links.saifjamal.tech/", adminKeyEnv: "SAIF_BOOKING_ADMIN_KEY", topics: ["Building with AI", "Web development", "Your project"] },
 } as const;
 
