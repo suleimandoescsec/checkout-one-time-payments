@@ -4,7 +4,7 @@ import { z } from "zod";
 import { candidateSlots } from "@/lib/booking/config";
 import { hostRecord, reservation, sql } from "@/lib/booking/db";
 import { assertOrigin, ipHash } from "@/lib/booking/security";
-import { assertMerchant, checkout, ready, reconcile } from "@/lib/booking/payments";
+import { assertCheckoutConfiguration, checkout, ready, reconcile } from "@/lib/booking/payments";
 const schema = z.object({ host: z.enum(["suleiman","saif"]), duration: z.union([z.literal(30),z.literal(60)]), start: z.iso.datetime(), name: z.string().trim().min(2).max(100), email: z.email().max(254).transform(s=>s.toLowerCase()), topic: z.string().trim().min(2).max(100), notes: z.string().trim().max(1500), timeZone: z.string().max(80), locale: z.enum(["en","ar"]), agreed: z.literal(true), website: z.string().max(0) });
 export async function POST(request: Request) {
   try { assertOrigin(request); } catch { return NextResponse.json({ error: "Invalid request" }, { status: 403 }); }
@@ -17,7 +17,8 @@ export async function POST(request: Request) {
   try {
     const host = await hostRecord(data.host);
     if (!host.enabled) return NextResponse.json({ error: "Bookings are currently paused." }, { status: 409 });
-    await assertMerchant();
+    // Validate merchant, price and restricted-key permissions before holding a slot.
+    await assertCheckoutConfiguration(data.host,data.duration);
     await reconcile(data.host);
     if (!candidateSlots(host.settings, data.duration).includes(new Date(data.start).toISOString())) return NextResponse.json({ error: "That time is no longer available. Please choose another." }, { status: 409 });
     const id = randomUUID();

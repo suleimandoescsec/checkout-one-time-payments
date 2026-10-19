@@ -29,7 +29,10 @@ Both hosts start paused until credentials are configured. Change hours in the da
 
 In the existing InstantReply Stripe account, open API keys in live mode and create a
 restricted key for personal bookings. Allow Checkout Sessions read/write,
-Products/Prices write, and current Account read. Keep other permissions disabled.
+Prices read, and current Account read. Keep other permissions disabled. The app
+reuses the four prices created by the Stripe plugin; it does not create products
+or prices at checkout. Merchant, active one-time USD amount and host/duration
+metadata are validated before a slot is held.
 Append `BOOKING_STRIPE_KEY=...` to the ignored `.env.local` file in this checkout.
 The key is server-only; never use a `NEXT_PUBLIC_` prefix or commit it.
 The private publishing helper reads it through stdin and saves it to Vercel Production
@@ -45,3 +48,19 @@ checkout.session.async_payment_failed, checkout.session.expired.
 External calendar busy-time syncing is not configured. Block outside commitments manually.
 Hosts email the meeting link before the call. Guests reply to confirmations for changes
 or cancellations; hosts handle refunds in Stripe. No recurring scheduler purchase is used.
+# Stripe plugin payment links, 18 October 2026
+
+The Stripe plugin created four live one-time prices and four payment links for
+Suleiman and Saif: USD 100 / 30 minutes and USD 200 / 60 minutes. Their twelve
+public ID/URL references are stored in Vercel Production and the ignored local
+`.env.booking-links.local`. These references are not reusable API credentials.
+
+The links are staged inactive until the booking flow is connected. Their return
+behavior uses Stripe's hosted confirmation rather than a nonexistent site URL.
+They do not activate the existing native scheduler. On 19 October 2026 the owner
+confirmed the required order: select an available time, pay, then receive booking
+confirmation. Keep that order. The scheduler uses a reservation-specific Checkout
+Session with the same 35-minute expiry as its hold. The existing scheduler still
+requires its restricted server credential and host activation. Never treat a
+browser return or a public Checkout Session ID as proof of payment.
+

@@ -5,7 +5,7 @@ import { z } from "zod";
 import { bookingHosts, isHost } from "@/lib/booking/config";
 import { hostRecord, sql } from "@/lib/booking/db";
 import { adminSession, assertOrigin, authenticatedHost, ipHash, validAdminKey } from "@/lib/booking/security";
-import { assertMerchant, ready, reconcile } from "@/lib/booking/payments";
+import { assertCheckoutConfiguration, ready, reconcile } from "@/lib/booking/payments";
 const cookieName = "personal_booking_admin";
 const settingsSchema = z.object({ timeZone: z.string().min(1).max(80), days: z.array(z.number().int().min(0).max(6)).min(1).max(7), startHour: z.number().int().min(0).max(23), endHour: z.number().int().min(1).max(47), noticeHours: z.number().int().min(1).max(168), bufferMinutes: z.number().int().min(0).max(120), horizonDays: z.number().int().min(7).max(60) }).refine(s => s.endHour > s.startHour && s.endHour - s.startHour <= 24);
 async function hostSession() { return authenticatedHost((await cookies()).get(cookieName)?.value); }
@@ -15,8 +15,8 @@ export async function GET() {
   let paymentsReady=ready();
   let paymentError="";
   if (paymentsReady) {
-    try { await assertMerchant(); await reconcile(host); }
-    catch { paymentsReady=false; paymentError="Couldn't verify payment setup. Check the live Stripe key, its account/read permissions, and email configuration."; }
+    try { await Promise.all([assertCheckoutConfiguration(host,30),assertCheckoutConfiguration(host,60)]); await reconcile(host); }
+    catch { paymentsReady=false; paymentError="Couldn't verify payment setup. Check the live Stripe key, Checkout Sessions read/write, Prices read, Account read, configured price IDs and email configuration."; }
   }
   const db = sql();
   const [record, bookings, blocks] = await Promise.all([hostRecord(host), db`SELECT id,name,email,topic,notes,starts_at,ends_at,status,amount,paid_at,stripe_session_id,created_at FROM personal_booking.reservations WHERE host_id=${host} ORDER BY starts_at DESC LIMIT 200`, db`SELECT id,starts_at,ends_at FROM personal_booking.blocks WHERE host_id=${host} AND ends_at>now() ORDER BY starts_at`]);
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     if (!parsed.success || typeof data.enabled !== "boolean") return NextResponse.json({ error: "Check your hours and settings" }, { status: 400 });
     try { new Intl.DateTimeFormat("en", { timeZone: parsed.data.timeZone }).format(); } catch { return new NextResponse("Invalid time zone", { status: 400 }); }
     if (data.enabled && !ready()) return NextResponse.json({ error: "Add the Stripe key, webhook secret and email key before enabling payments." }, { status: 409 });
-    if (data.enabled) { try { await assertMerchant(); } catch { return NextResponse.json({ error: "Check that the live Stripe key belongs to your InstantReply account and allows reading account details." }, { status: 409 }); } }
+    if (data.enabled) { try { await Promise.all([assertCheckoutConfiguration(host,30),assertCheckoutConfiguration(host,60)]); } catch { return NextResponse.json({ error: "Check the live Stripe key and both consultation prices. The key needs Checkout Sessions read/write, Prices read and Account read." }, { status: 409 }); } }
     await sql()`UPDATE personal_booking.hosts SET enabled=${data.enabled},settings=${JSON.stringify(parsed.data)}::jsonb,updated_at=now() WHERE id=${host}`;
   } else if (data.action === "block") {
     const parsed = z.object({ start:z.iso.datetime(),end:z.iso.datetime() }).safeParse(data);

@@ -1,6 +1,6 @@
 import "server-only";
 import Stripe from "stripe";
-import { bookingHosts, publicBookingOrigin, publicBookingPath } from "./config";
+import { bookingHosts, priceFor, publicBookingOrigin, publicBookingPath, type HostId } from "./config";
 import { sql, reservation, type Reservation } from "./db";
 import { bookingToken } from "./security";
 import { sendConfirmation } from "./email";
@@ -13,7 +13,12 @@ export function stripeClient() {
 export function ready() {
   const key=process.env.BOOKING_STRIPE_KEY || "";
   const validMode=process.env.NODE_ENV !== "production" || /^(sk|rk)_live_/.test(key);
-  return !!(key && validMode && process.env.BOOKING_STRIPE_ACCOUNT_ID && process.env.BOOKING_STRIPE_WEBHOOK_SECRET && process.env.BOOKING_RESEND_KEY && process.env.BOOKING_DATABASE_URL && process.env.BOOKING_SIGNING_SECRET);
+  const pricesReady=(["suleiman","saif"] as const).every(host=>([30,60] as const).every(duration=>/^price_[a-zA-Z0-9]+$/.test(configuredPriceId(host,duration))));
+  return !!(key && validMode && pricesReady && process.env.BOOKING_STRIPE_ACCOUNT_ID && process.env.BOOKING_STRIPE_WEBHOOK_SECRET && process.env.BOOKING_RESEND_KEY && process.env.BOOKING_DATABASE_URL && process.env.BOOKING_SIGNING_SECRET);
+}
+
+function configuredPriceId(host: HostId, duration: 30 | 60) {
+  return process.env[`BOOKING_STRIPE_${host.toUpperCase()}_${duration}_PRICE_ID`] || "";
 }
 
 let verifiedUntil=0;
@@ -24,22 +29,37 @@ export async function assertMerchant() {
   verifiedUntil=Date.now()+300000;
 }
 
+const verifiedPrices=new Map<string,number>();
+export async function assertCheckoutConfiguration(host: HostId, duration: 30 | 60) {
+  const id=configuredPriceId(host,duration);
+  if(!/^price_[a-zA-Z0-9]+$/.test(id))throw new Error("Booking price is not configured");
+  const cacheKey=`${host}:${duration}:${id}`;
+  await Promise.all([assertMerchant(),(async()=>{
+    if(Date.now()<(verifiedPrices.get(cacheKey)||0))return;
+    const price=await stripeClient().prices.retrieve(id);
+    if(!price.active || price.type!=="one_time" || price.currency!=="usd" || price.unit_amount!==priceFor(duration) || price.metadata.host!==host || price.metadata.duration!==String(duration) || (process.env.NODE_ENV==="production"&&!price.livemode))throw new Error("Booking price does not match the session");
+    verifiedPrices.set(cacheKey,Date.now()+300000);
+  })()]);
+  return id;
+}
+
 // Adapted from stripe-samples/checkout-one-time-payments (MIT); see THIRD_PARTY_NOTICES.md.
 export async function checkout(row: Reservation) {
-  await assertMerchant();
+  const price=await assertCheckoutConfiguration(row.host_id,row.duration);
   const token = bookingToken(row.id);
+  const when=new Intl.DateTimeFormat(row.locale,{timeZone:row.time_zone,dateStyle:"full",timeStyle:"short"}).format(new Date(row.starts_at));
   const session = await stripeClient().checkout.sessions.create({
     mode: "payment",
     customer_email: row.email,
     client_reference_id: row.id,
     integration_identifier: "personal-booking-qwertyui",
-    line_items: [{ quantity: 1, price_data: { currency: "usd", unit_amount: row.amount, product_data: { name: `${row.duration}-minute consultation with ${bookingHosts[row.host_id].name}`, description: `${new Date(row.starts_at).toISOString()} · ${row.topic}` } } }],
+    line_items: [{ quantity: 1, price }],
     metadata: { integration: "personal_booking_v1", reservation_id: row.id, host: row.host_id },
     payment_intent_data: { metadata: { integration: "personal_booking_v1", reservation_id: row.id, host: row.host_id } },
     expires_at: Math.floor(new Date(row.expires_at).getTime() / 1000),
     success_url: `${publicBookingOrigin(row.host_id)}/book/confirmed?id=${row.id}&token=${token}`,
     cancel_url: `${publicBookingOrigin(row.host_id)}${publicBookingPath(row.host_id, row.locale)}?cancelled=1`,
-    custom_text: { submit: { message: "Your time is confirmed after successful payment. To change or cancel, reply to your confirmation email." } },
+    custom_text: { submit: { message: row.locale==="ar" ? `جلسة مع ${bookingHosts[row.host_id].name}: ${when} (${row.time_zone}). يتم تأكيد الموعد بعد نجاح الدفع. للتغيير أو الإلغاء، رد على رسالة التأكيد.` : `Call with ${bookingHosts[row.host_id].name}: ${when} (${row.time_zone}). Your time is confirmed after successful payment. For changes or cancellation, reply to your confirmation email.` } },
   }, { idempotencyKey: `booking-checkout-${row.id}` });
   await sql()`UPDATE personal_booking.reservations SET stripe_session_id=${session.id} WHERE id=${row.id}::uuid AND (stripe_session_id IS NULL OR stripe_session_id=${session.id})`;
   if (!session.url) throw new Error("Checkout is unavailable");
